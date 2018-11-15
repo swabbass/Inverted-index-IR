@@ -1,0 +1,22 @@
+highest term freqs:
+ward
+south
+african
+will
+some
+social
+security
+in
+changes
+abbass
+lowest term freqs:
+47
+541
+566.
+and
+average
+benefit
+benefits
+check
+checks
+effect
