@@ -28,6 +28,8 @@ def parseBoolExp(st: str):
     # print(st)
     if len(st) == 0 or (not ('(' in st)):
         spl = st.split(" ")
+        if len(spl) == 1:
+            return Node(spl[0])
         leafLeft = Node(spl[0])
         opNode = Node(spl[1])
         leafRight = Node(spl[2])
@@ -74,21 +76,36 @@ def mergeTreeOfPostingLists(root: Node) -> LinkedList:
         if root.data == "AND":
             return mergeTreeOfPostingLists(root.left).intersect(mergeTreeOfPostingLists(root.right))
         if root.data == "NOT":
-            return
+            return mergeTreeOfPostingLists(root.left).andNot(mergeTreeOfPostingLists(root.right))
+        if root.data == "OR":
+            return mergeTreeOfPostingLists(root.left).Or(mergeTreeOfPostingLists(root.right))
     else:
         return root.data
 
 
-def BooleanRetrieval(idx: InvertIndex):
-    queries = [query]
+def BooleanRetrieval(queries, idx: InvertIndex):
+    open("Part_2.txt", 'w').close()
     for tmpQuery in queries:
         tree = parseBoolExp(tmpQuery)
-        printPreOrder(tree)
         postingTree = makePostingListsTree(tree, idx)
-        printPreOrder(postingTree)
-        print(mergeTreeOfPostingLists(postingTree))
+        res = mergeTreeOfPostingLists(postingTree)
+        print("query " + tmpQuery)
+        with open("Part_2.txt", 'a') as f:
+            idmap = invIndex.docIdDocNo
+            line = " ".join(map(lambda z: str(idmap[str(z)]), res.toList()))
+            f.write(line + "\n")
 
 
-invIdx = InvertedIndex()
+def loadQueries():
+    with open("BooleanQueries.txt") as qFile:
+        lines = list(map(lambda line: line.rstrip('\n').replace("( ", "(").replace(" )", ")"), qFile.readlines()))
+    return lines
 
-BooleanRetrieval(invIdx)
+
+queries = loadQueries()
+print("running queries.....")
+BooleanRetrieval(queries, invIndex)
+# for q in queries:
+#     print(q)
+#     tree = parseBoolExp(q)
+#     printPreOrder(tree)

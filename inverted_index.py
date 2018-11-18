@@ -2,6 +2,9 @@ import os
 import xml.etree.ElementTree as ElementTree
 from typing import Dict, Set
 import json
+import shelve
+
+# import semidbm
 
 docCount: int = 1
 
@@ -21,6 +24,12 @@ class LinkedList:
         self.head = None
         self.last = None
         self.current: ListNode = None
+
+    def fromSortedList(self, l):
+        for a in l:
+            if self.last is None or a != self.last.val:
+                self.addLast(a)
+        return self
 
     def addLast(self, data: object) -> None:
         if self.head is None:
@@ -60,6 +69,13 @@ class LinkedList:
                 retval.addLast(otherone.val)
                 thisone = thisone.next
                 otherone = otherone.next
+        while thisone:
+            retval.addLast(thisone.val)
+            thisone = thisone.next
+
+        while otherone:
+            retval.addLast(otherone.val)
+            otherone = otherone.next
         return retval
 
     def andNot(self, olinked):
@@ -109,10 +125,6 @@ class LinkedList:
     def toJsonArray(self):
         return json.dumps(self.toList())
 
-    def initFromList(self, pList):
-        for it in pList:
-            self.addLast(it)
-
 
 class LingModule:
 
@@ -139,11 +151,10 @@ class LingModule:
 
 class IRDoc:
 
-    def __init__(self, id, docNo, text, feildId) -> None:
+    def __init__(self, id, docNo, text) -> None:
         self.id = id
         self.docNo = docNo
         self.text: str = text
-        self.fieldId = feildId
         self.lingModule = LingModule()
         self.lingModule.addLingMapping(LingModule.toLowercase)
         self.wordSet: set = self._tokenize()
@@ -155,10 +166,7 @@ class IRDoc:
 
     def __str__(self) -> str:
         return "id:" + str(self.id) + "\n" + "docNo:" + str(self.docNo) + "\n" + "text:" + str(
-            self.text) + "\n" + "fieldId:" + str(self.fieldId) + "\n"
-
-    def hasWord(self, word: str) -> bool:
-        return self.lingModule.apply(word) in self.wordSet
+            self.text) + "\n"
 
 
 class InvertIndex:
@@ -166,73 +174,51 @@ class InvertIndex:
     def __init__(self) -> None:
         self.indexPath = "invertedIndex.json"
         self.latestDocId = 1
-        self.index: Dict[str, LinkedList] = dict()
-        self.wordDocIdDict: Dict[str, set] = dict()
-        self.docs: Dict[int, IRDoc] = dict()
+
+        exists = os.path.exists('index.pkl')
+        print("file exists " + str(exists))
+        self.mode = 'r' if exists else 'c'
+        self.index = shelve.open("index.pkl", self.mode, writeback=exists)
+        self.docIdDocNo = shelve.open("docIddocNo.pkl", self.mode, writeback=exists)
         self.lingModule = LingModule()
         self.lingModule.addLingMapping(LingModule.toLowercaseStr)
 
     def findInIndex(self, word) -> LinkedList:
         tmpWord = self.lingModule.apply(word)
         if tmpWord in self.index:
-            return self.index[tmpWord]
+            return LinkedList().fromSortedList(self.index[tmpWord])
         else:
             return LinkedList()
 
-    def indexWord(self, word: str, docId: int):
+    def indexWord(self, word: str, doc: IRDoc):
         if len(word) == 0 or len(word.strip()) == 0 or not word:
             return
-        if word in self.wordDocIdDict:
-            if not (docId in self.wordDocIdDict[word]):
-                self.wordDocIdDict[word].add(docId)
-                self.index[word].addLast(docId)
+
+        if word in self.index:
+            # if not (doc.id in self.index[word]):
+            self.index[word].append(doc.id)
         else:
-            self.wordDocIdDict[word] = set()
-            self.index[word] = LinkedList()
-            self.wordDocIdDict[word].add(docId)
-            self.index[word].addLast(docId)
+            self.index[word] = []
+            self.index[word].append(doc.id)
 
     def indexIRDoc(self, doc: IRDoc):
         self.latestDocId = doc.id
-        self.docs[doc.id] = doc
+        self.docIdDocNo[str(doc.id)] = doc.docNo
         for word in doc.wordSet:
-            self.indexWord(word, doc.id)
-
-    def save(self):
-        file = open(self.indexPath, "w")
-        jsonIdx = dict()
-        jsonIdx["latestDocId"] = self.latestDocId
-        jsonIdx["index"] = dict()
-        for key in self.index:
-            jsonIdx["index"][key] = self.index[key].toList()
-        file.write(json.dumps(jsonIdx))
-        file.close()
-
-    def load(self):
-        if not os.path.exists(self.indexPath):
-            return
-        with open(self.indexPath, "r") as f:
-            data = json.load(f)
-            self.latestDocId = int(data["latestDocId"])
-            jsonIdx = data["index"]
-            for key in jsonIdx:
-                docs = LinkedList()
-                docs.initFromList(jsonIdx[key])
-                self.wordDocIdDict[key] = set(jsonIdx[key])
-                self.index[key] = docs
+            self.indexWord(word, doc)
 
     def maxKFreqTerms(self, k):
-        sorted_by_value = sorted(self.wordDocIdDict.items(), key=lambda kv: (len(kv[1]), kv[0]), reverse=True)
-        topK = sorted_by_value[:k]
+        sorted_by_value = sorted(self.index.items(), key=lambda kv: (len(kv[1]), kv[0]), reverse=True)
+        topK = sorted_by_value[0:k]
         return topK
 
     def minKFreqTerms(self, k):
-        sorted_by_value = sorted(self.wordDocIdDict.items(), key=lambda kv: (len(kv[1]), kv[0]))
+        sorted_by_value = sorted(self.index.items(), key=lambda kv: (len(kv[1]), kv[0]))
         topK = sorted_by_value[:k]
         return topK
 
     def writeStats(self):
-        open("Part_3.txt", "w").close()
+        # open("Part_3.txt", "w").close()
         f = open("Part_3.txt", "a")
         f.write("highest term freqs:\n")
         for key, _ in self.maxKFreqTerms(10):
@@ -244,106 +230,19 @@ class InvertIndex:
             f.write('\n')
         f.close()
 
+    def sync(self):
+        if self.mode != 'r':
+            self.index.sync()
+            self.index.close()
+            self.index = shelve.open("index.pkl", 'c', writeback=True)
+        else:
+            self.index.close()
+
 
 def __str__(self) -> str:
     for key, val in self.index.items():
         print(str(key) + ": " + str(val))
     return str(self.wordDocIdDict)
-
-
-def testLinkedList():
-    tmpList = LinkedList()
-    tmpList.addLast(1)
-    tmpList.addLast(2)
-    tmpList.addLast(3)
-    for it in tmpList:
-        print(it.val)
-
-
-def testInvertedIndex():
-    invIdx = InvertIndex()
-    invIdx.indexWord("ward", 1)
-    invIdx.indexWord("ward", 1)
-    invIdx.indexWord("ward", 2)
-    invIdx.indexWord("ward", 3)
-    invIdx.indexWord("ward", 4)
-    invIdx.indexWord("warde", 2)
-    invIdx.indexWord("warde", 1)
-    invIdx.indexWord("wardeq", 1)
-    print(invIdx)
-
-
-def testIntersectTwoLinkedLists():
-    l1 = LinkedList()
-    l1.addLast(2)
-    l1.addLast(4)
-    l1.addLast(8)
-    l1.addLast(16)
-    l1.addLast(32)
-    l1.addLast(64)
-    l1.addLast(128)
-
-    l2 = LinkedList()
-    l2.addLast(1)
-    l2.addLast(2)
-    l2.addLast(3)
-    l2.addLast(5)
-    l2.addLast(8)
-    l2.addLast(13)
-    l2.addLast(21)
-    l2.addLast(34)
-
-    # print(l1.intersect(l2))
-
-
-def testNotIntersect():
-    l1 = LinkedList()
-    l1.addLast(2)
-    l1.addLast(4)
-    l1.addLast(8)
-    l1.addLast(16)
-    l1.addLast(32)
-    l1.addLast(64)
-    l1.addLast(128)
-
-    l2 = LinkedList()
-    l2.addLast(1)
-    l2.addLast(2)
-    l2.addLast(3)
-    l2.addLast(5)
-    l2.addLast(8)
-    l2.addLast(13)
-    l2.addLast(21)
-    l2.addLast(34)
-
-    print(l1)
-    print(l1.intersect(l2))
-    print(l1.andNot(l2))
-
-
-def testOrIntersect():
-    l1 = LinkedList()
-    l1.addLast(2)
-    l1.addLast(4)
-    l1.addLast(8)
-    l1.addLast(16)
-    l1.addLast(32)
-    l1.addLast(64)
-    l1.addLast(128)
-
-    l2 = LinkedList()
-    l2.addLast(1)
-    l2.addLast(2)
-    l2.addLast(3)
-    l2.addLast(5)
-    l2.addLast(8)
-    l2.addLast(13)
-    l2.addLast(21)
-    l2.addLast(34)
-
-    print(l1.toJsonArray())
-    print(l2)
-    print(l1.Or(l2))
 
 
 def loadFiles() -> list:
@@ -358,28 +257,29 @@ def loadFiles() -> list:
 
 def InvertedIndex() -> InvertIndex:
     invertedIdx: InvertIndex = InvertIndex()
+    if len(invertedIdx.index) != 0:
+        return invertedIdx
     xml = None
     files = loadFiles()
     cnt = 0
-
     for file in files:
+        print(cnt)
         path = os.path.realpath(file)
         try:
             indexDocsInFile(path, invertedIdx)
-            invertedIdx.save()
-            if cnt == 1000000:
-                break
-            cnt += 1
         except ElementTree.ParseError as err:
-            errFile = open("errors", "w")
-            errFile.write(path + " , " + str(err) + "\n")
-            print(err)
-            errFile.close()
+            with open("errors.txt", 'a') as f:
+                f.write(path + ", " + str(err) + "\n")
+        cnt += 1
+        if cnt % 100 == 0:
+            invertedIdx.sync()
+            print("syncDone")
+    invertedIdx.sync()
     return invertedIdx
 
 
 def indexDocsInFile(filePath, invertedIdx):
-    print("now working on " + filePath)
+    # print("now working on " + filePath)
     with open(filePath, 'r') as f:  # Reading file
         xml = f.read()
     xml = '<ROOT>' + xml + '</ROOT>'
@@ -389,16 +289,19 @@ def indexDocsInFile(filePath, invertedIdx):
         text = ""
         cases = doc.findall("TEXT")
         for c in cases:
-            text += c.text.strip()
-            text += " "
-        irDoc = IRDoc(docID, doc.find('DOCNO').text.strip(), text, "")
+            if not (c is None) and not (c.text is None):
+                text += c.text.strip()
+                text += " "
+        irDoc = IRDoc(docID, doc.find('DOCNO').text.strip(), text)
         docID = docID + 1
-        print("docId now " + str(docID))
+        # print("docId now " + str(docID))
         invertedIdx.indexIRDoc(irDoc)
     invertedIdx.latestDocId = docID
     # print(invertedIdx)
-    invertedIdx.writeStats()
+    # invertedIdx.writeStats()
 
 
 invIndex = InvertedIndex()
-print(invIndex.wordDocIdDict)
+print("writing status....")
+invIndex.writeStats()
+# print(LinkedList().fromSortedList(invIndex.index["more"]))
